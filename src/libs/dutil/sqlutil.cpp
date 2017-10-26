@@ -20,6 +20,9 @@ static HRESULT EscapeSqlIdentifier(
     __deref_out_z LPWSTR* ppwz
     );
 
+static HRESULT GetSqlProvider(
+    __out IDBInitialize** ppidbInitialize
+    );
 
 /********************************************************************
  SqlConnectDatabase - establishes a connection to a database
@@ -51,9 +54,8 @@ extern "C" HRESULT DAPI SqlConnectDatabase(
     memset(rgdbpInit, 0, sizeof(rgdbpInit));
     memset(rgdbpsetInit, 0, sizeof(rgdbpsetInit));
 
-    //obtain access to the SQLOLEDB provider
-    hr = ::CoCreateInstance(CLSID_SQLOLEDB, NULL, CLSCTX_INPROC_SERVER,
-                            IID_IDBInitialize, (LPVOID*)&pidbInitialize);
+    //obtain access to the SQL provider
+	hr = GetSqlProvider(&pidbInitialize);
     ExitOnFailure(hr, "failed to create IID_IDBInitialize object");
 
     // if there is an instance
@@ -771,6 +773,50 @@ LExit:
 //
 // private
 //
+
+/********************************************************************
+ GetSqlProvider - get a SQL database provider
+
+ NOTE: first try the different versions of the SQL Native Client driver
+       until one is found on the system, before falling back to the
+       (deprecated) SQLOLEDB driver
+*********************************************************************/
+static HRESULT GetSqlProvider(
+    __out IDBInitialize** ppidbInitialize
+    )
+{
+	HRESULT hr;
+
+    // Try to get SQL Native Client 11
+    hr = ::CoCreateInstance(CLSID_SQLNCLI11, NULL, CLSCTX_INPROC_SERVER,
+                            IID_IDBInitialize, (LPVOID*)ppidbInitialize);
+	if (REGDB_E_CLASSNOTREG != hr)
+	{
+        // Return if we get any error other than class not registered - this
+        // includes S_OK or any errors that the caller will need to handle
+        return hr;
+    }
+
+	// Try to get SQL Native Client 10
+    hr = ::CoCreateInstance(CLSID_SQLNCLI10, NULL, CLSCTX_INPROC_SERVER,
+                            IID_IDBInitialize, (LPVOID*)ppidbInitialize);
+	if (REGDB_E_CLASSNOTREG != hr)
+	{
+		return hr;
+	}
+
+	// Try to get SQL Native Client (unversioned)
+    hr = ::CoCreateInstance(CLSID_SQLNCLI, NULL, CLSCTX_INPROC_SERVER,
+                            IID_IDBInitialize, (LPVOID*)ppidbInitialize);
+	if (REGDB_E_CLASSNOTREG != hr)
+	{
+		return hr;
+	}
+
+	// Fall back to SQLOLEDB driver
+    return ::CoCreateInstance(CLSID_SQLOLEDB, NULL, CLSCTX_INPROC_SERVER,
+                            IID_IDBInitialize, (LPVOID*)ppidbInitialize);
+}
 
 /********************************************************************
  FileSpecToString
